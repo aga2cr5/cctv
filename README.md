@@ -22,3 +22,7 @@ You should also preferrable create a new low priviledge user for the program to 
 sudo adduser cctv
 sudo usermod -a -G video cctv
 ```
+
+To start the cctv system you have to open up the stream in your browser.
+
+This can be achieved via ssh tunnel to the computer the software is running on.
