@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from dotenv import load_dotenv
+from os import getenv
 from flask import Flask, Response
 import cv2
 import time
@@ -8,31 +10,40 @@ import subprocess
 import requests
 import json
 
+load_dotenv()
 
+MATTERMOST_WEBHOOK = getenv("MATTERMOST_WEBHOOK")
 SECONDS_TO_RECORD_AFTER_DETECTION = 10
 TIME_TO_START_FILMING_AFTER_DOOR_OPENING = 1800
-MATTERMOST_WEBHOOK = "https://chat.entropy.fi/hooks/ifqmnphi13rtpqdi65fe9jjw8h"
 
 
 app = Flask(__name__)
+# The capture device needs to be changed according to the webcam used
 cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
     print("Cannot open camera")
     exit()
 mog = cv2.createBackgroundSubtractorMOG2()
-
-
 frame_size = (int(cap.get(3)), int(cap.get(4)))
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
 
 def send_notification_to_mattermost(url, message):
+    """Sends notifications to mattermost through a webhook"""
     default_headers = {"content-type": "application/json"}
-    requests.post(url, data=json.dumps(message), headers=default_headers)
+    try:
+        response = requests.post(url, data=json.dumps(message), headers=default_headers)
+        if response.status_code != 200:
+            raise Exception(
+                f"Http request to mattermost returned statuscode: {response.status_code}"
+            )
+    except Exception as err:
+        print(f"Could not send message to mattermost because:\n{err}")
 
 
 def get_door_log():
+    """This ssh connection is using key based authentication"""
     try:
         response = subprocess.run(
             "ssh cctv@192.168.1.20 tail -n 1 /home/av/electric_door_log.txt",
@@ -43,47 +54,47 @@ def get_door_log():
         return time_in_unix
 
     except Exception as err:
-        message = err.message
+        message = err
         send_notification_to_mattermost(MATTERMOST_WEBHOOK, message)
     # if this fails then it says that the door has been opened like 30 mins before
     return time.time() - 1800
 
 
 def process_image(frame):
-    """Move the image processing stuff here from the gen method"""
-    pass
+    """Image processsing here"""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    fgmask = mog.apply(gray)
+
+    # Apply morphological operations to reduce noise and fill gaps
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    fgmask = cv2.erode(fgmask, kernel, iterations=1)
+    fgmask = cv2.dilate(fgmask, kernel, iterations=1)
+
+    return fgmask
 
 
-def gen(cap):
+def generate_frame(cap):
+    """Generates a frame for the video stream"""
     detection = False
     detection_stopped_time = None
     timer_started = False
 
     while True:
         ret, frame = cap.read()
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        fgmask = mog.apply(gray)
-
-        # Apply morphological operations to reduce noise and fill gaps
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        fgmask = cv2.erode(fgmask, kernel, iterations=1)
-        fgmask = cv2.dilate(fgmask, kernel, iterations=1)
+        fgmask = process_image(frame)
 
         contours, hierarchy = cv2.findContours(
             fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        # tässä voisi vielä miettiä haluaako jotenkin filtteröidä noita liikehavaintoja
-        # if cv2.contourArea(contour) < 2000:
+        # Filter moving targets to include only targets with area larger than 2000 pixels
         moving_targets = list(
             filter(lambda contour: cv2.contourArea(contour) > 2000, contours)
         )
-        # aikaisemmin tässä oli vain contours moving_targets sijasta
+
         if len(moving_targets) > 0:
             time_now = time.time()
             last_login = get_door_log()
-
             if detection:
                 timer_started = False
             elif time_now - last_login > TIME_TO_START_FILMING_AFTER_DOOR_OPENING:
@@ -106,23 +117,8 @@ def gen(cap):
             else:
                 timer_started = True
                 detection_stopped_time = time.time()
-
         if detection:
             out.write(frame)
-        """
-            # näkyykö kuvassa liikettä?
-            # onko ovi avattu sähkölukolla?
-            # kuinka kauan oven avaamisesta sähkölukolla on aikaa?
-            # lähetetäänkö ilmoitus esim. telegramiin tai sähköpostiin?
-            # laitetaanko esim. 10 sec välein kuvia telegramiin?
-            # aloitetaanko tallennus?
-            # mitä jos kameraan kajotaan? minne tallennetaan?
-            # kuka pääsee näkemään tallenteen?
-
-            # Draw bounding box around contour
-            x, y, w, h = cv2.boundingRect(contour)
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        """
 
         ret, jpeg = cv2.imencode(".jpg", frame)
         frame = jpeg.tobytes()
@@ -131,8 +127,11 @@ def gen(cap):
 
 @app.route("/video_feed")
 def video_feed():
+    """Method for showing video feed in the local network"""
     global cap
-    return Response(gen(cap), mimetype="multipart/x-mixed-replace; boundary=frame")
+    return Response(
+        generate_frame(cap), mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 if __name__ == "__main__":
