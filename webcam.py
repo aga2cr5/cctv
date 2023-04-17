@@ -32,11 +32,12 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 def send_notification_to_mattermost(url, message):
     """Sends notifications to mattermost through a webhook"""
     default_headers = {"content-type": "application/json"}
+    message = {"text": str(message)}
     try:
         response = requests.post(url, data=json.dumps(message), headers=default_headers)
         if response.status_code != 200:
             raise Exception(
-                f"Http request to mattermost returned statuscode: {response.status_code}"
+                f"Http request to mattermost failed: {response.status_code}"
             )
     except Exception as err:
         print(f"Could not send message to mattermost because:\n{err}")
