@@ -43,7 +43,7 @@ def send_notification_to_mattermost(url, message):
 
 
 def get_door_log():
-    """This ssh connection is using key based authentication"""
+    """This ssh connection is using key based authentication. Returns time in unix time format"""
     try:
         response = subprocess.run(
             "ssh cctv@192.168.1.20 tail -n 1 /home/av/electric_door_log.txt",
@@ -78,6 +78,7 @@ def generate_frame(cap):
     detection = False
     detection_stopped_time = None
     timer_started = False
+    last_login_checked_time = None
 
     while True:
         ret, frame = cap.read()
@@ -94,9 +95,16 @@ def generate_frame(cap):
 
         if len(moving_targets) > 0:
             time_now = time.time()
-            last_login = get_door_log()
+            # check last login time every 3 minutes. This is to reduce unnecessary ssh connections to the oviraspi
+            if (
+                last_login_checked_time == None
+                or time_now - last_login_checked_time > 300
+            ):
+                last_login = get_door_log()
+
             if detection:
                 timer_started = False
+
             elif time_now - last_login > TIME_TO_START_FILMING_AFTER_DOOR_OPENING:
                 detection = True
                 current_time = datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S")
@@ -104,6 +112,7 @@ def generate_frame(cap):
                 message = "Started Recording!"
                 send_notification_to_mattermost(MATTERMOST_WEBHOOK, message)
                 print(message)
+
         elif detection:
             if timer_started:
                 if (
@@ -113,7 +122,9 @@ def generate_frame(cap):
                     detection = False
                     timer_started = False
                     out.release()
-                    print("Stop Recording!")
+                    message = "Stop Recording!"
+                    send_notification_to_mattermost(MATTERMOST_WEBHOOK, message)
+                    print(message)
             else:
                 timer_started = True
                 detection_stopped_time = time.time()
