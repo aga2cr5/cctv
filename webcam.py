@@ -2,7 +2,6 @@
 
 from dotenv import load_dotenv
 from os import getenv
-from flask import Flask, Response
 import cv2
 import time
 import datetime
@@ -17,13 +16,13 @@ SECONDS_TO_RECORD_AFTER_DETECTION = 10
 TIME_TO_START_FILMING_AFTER_DOOR_OPENING = 1800
 
 
-app = Flask(__name__)
 # The capture device needs to be changed according to the webcam used
 cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
     print("Cannot open camera")
     exit()
+
 mog = cv2.createBackgroundSubtractorMOG2()
 frame_size = (int(cap.get(3)), int(cap.get(4)))
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -96,7 +95,7 @@ def generate_frame(cap):
 
         if len(moving_targets) > 0:
             time_now = time.time()
-            # check last login time every 3 minutes. This is to reduce unnecessary ssh connections to the oviraspi
+            # check last login time every 3 minutes to reduce unnecessary ssh connections
             if (
                 last_login_checked_time == None
                 or time_now - last_login_checked_time > 300
@@ -112,7 +111,6 @@ def generate_frame(cap):
                 out = cv2.VideoWriter(f"{current_time}.mp4", fourcc, 20, frame_size)
                 message = "Started Recording!"
                 send_notification_to_mattermost(MATTERMOST_WEBHOOK, message)
-                print(message)
 
         elif detection:
             if timer_started:
@@ -125,26 +123,18 @@ def generate_frame(cap):
                     out.release()
                     message = "Stop Recording!"
                     send_notification_to_mattermost(MATTERMOST_WEBHOOK, message)
-                    print(message)
             else:
                 timer_started = True
                 detection_stopped_time = time.time()
         if detection:
             out.write(frame)
 
-        ret, jpeg = cv2.imencode(".jpg", frame)
-        frame = jpeg.tobytes()
-        yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n\r\n")
-
-
-@app.route("/video_feed")
-def video_feed():
-    """Method for showing video feed in the local network"""
-    global cap
-    return Response(
-        generate_frame(cap), mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
-
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=2204, threaded=True)
+    try:
+        send_notification_to_mattermost(MATTERMOST_WEBHOOK, "CCTV system started!")
+        generate_frame(cap)
+    except KeyboardInterrupt:
+        send_notification_to_mattermost(MATTERMOST_WEBHOOK, "CCTV system stopped!")
+        print("\nExiting the program\n")
+        exit()
