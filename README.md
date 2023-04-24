@@ -1,6 +1,6 @@
 # CCTV
 
-A simple webcam cctv for monitoring spaces. This application has a web interface to check on the video stream. In case movement is detected, the program saves the recording into a file.
+A simple webcam cctv for monitoring spaces. In case movement is detected, the program saves the recording into a file.
 
 To install this application run:
 
@@ -23,6 +23,4 @@ sudo adduser cctv
 sudo usermod -a -G video cctv
 ```
 
-To start the cctv system you have to open up the stream in your browser.
-
-This can be achieved via ssh tunnel to the computer the software is running on.
+To start the program you should just run it behind a screen or tmux. More sophisticated solution would be to run it as a service. Instructions on how to set this up will be added later on.
